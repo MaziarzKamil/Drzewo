@@ -1,17 +1,42 @@
 const express = require("express");
 const mysql = require("mysql");
 const bodyParser = require("body-parser");
+const multer = require("multer");
+const path = require("path");
 const cors = require("cors");
 const port = 3000;
 const cookies = require("cookie-parser");
 
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, "Dane/");
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
+    cb(null, uniqueSuffix + path.extname(file.originalname));
+  },
+});
+const fileFilter = (req, file, cb) => {
+  const allowedTypes = /jpeg|jpg|png|gif/;
+  const extname = allowedTypes.test(
+    path.extname(file.originalname).toLowerCase()
+  );
+  const mimetype = allowedTypes.test(file.mimetype);
+  if (extname && mimetype) {
+    return cb(null, true);
+  } else {
+    cb("Error: Images Only!");
+  }
+};
+const upload = multer({ storage: storage, fileFilter: fileFilter });
+
 const app = express();
 app.use(cors());
 app.use(bodyParser.json());
-
+app.use(express.urlencoded({ extended: true }));
 let name = "";
 let loggedId = null;
-
+app.use("/Dane", express.static(path.join(__dirname, "Dane")));
 const connection = mysql.createConnection({
   host: "localhost",
   user: "root",
@@ -65,6 +90,20 @@ app.post("/Register", (req, res) => {
   });
 });
 
+app.delete("/deletePerson/:id", (req, res) => {
+  const personId = req.params.id;
+
+  const query = `DELETE FROM ancestors WHERE person_id = ?`;
+  connection.query(query, [personId], (error, result) => {
+    if (error) {
+      console.error(error);
+      res.json({ success: false, message: "Database error", error });
+    } else {
+      res.json({ success: true });
+    }
+  });
+});
+
 app.get("/mainPage", async (req, res) => {
   const id = loggedId;
   const query = "SELECT * FROM `ancestors` WHERE user_id LIKE ?";
@@ -91,7 +130,7 @@ app.get("/mainPage", async (req, res) => {
   }
 });
 
-app.post("/Add", (req, res) => {
+app.post("/Add", upload.single("photo"), (req, res) => {
   let {
     dateB,
     dateD,
@@ -106,7 +145,8 @@ app.post("/Add", (req, res) => {
     parrent2,
     note,
   } = req.body;
-  if (!dateD) dateD = "Brak";
+  let photo = req.file ? req.file.filename : "None";
+  if (!dateD) dateD = null;
   if (!occupation) occupation = "Nieznane/brak";
   if (!middleName) middleName = "Nieznane/brak";
   if (!placeOfDeath) placeOfDeath = "Jeszcze Nieznane";
@@ -114,14 +154,14 @@ app.post("/Add", (req, res) => {
   if (!parrent1) parrent1 = 0;
   if (!parrent2) parrent2 = 0;
   const date = new Date();
-  const currentDate = `${date.getFullYear()}-${
-    date.getMonth() + 1
-  }-${date.getDate()}`;
+  const currentDate = `${date.getFullYear()}-${(date.getMonth() + 1)
+    .toString()
+    .padStart(2, "0")}-${date.getDate().toString().padStart(2, "0")}`;
   const query = `INSERT INTO ancestors (person_id, user_id, name, middle_name, surname, dateOfBirth, dateOfDeath, gender, placeOfBirth, placeOfDeath, occupation, notes, parent_id, parent_id2, photo, dateLastUpdated, children_ids) VALUES (NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
   connection.query(
     query,
     [
-      loggedId, // Zamiast "1"
+      loggedId,
       name,
       middleName,
       surname,
@@ -134,12 +174,13 @@ app.post("/Add", (req, res) => {
       note,
       parrent1,
       parrent2,
-      "None",
+      photo,
       currentDate,
       "0",
     ],
     (error, result) => {
       if (error) {
+        console.error(error);
         res.json({ success: false, message: "Database error", error });
       } else {
         res.json({ success: true });
@@ -147,6 +188,7 @@ app.post("/Add", (req, res) => {
     }
   );
 });
+
 app.listen(port, () => {
   console.log(`Server is running at http://localhost:${port}`);
 });
